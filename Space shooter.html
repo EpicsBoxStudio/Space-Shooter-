@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Space Shooter Móvil</title>
     <style>
         * {
@@ -15,13 +15,15 @@
             touch-action: none;
         }
         
-        body {
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
             background: #0a0a1a;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            overflow: hidden;
             touch-action: none;
             font-family: Arial, sans-serif;
         }
@@ -35,6 +37,7 @@
             background: #000;
             overflow: hidden;
             touch-action: none;
+            margin: 0 auto;
         }
         
         #game {
@@ -56,7 +59,7 @@
             background: rgba(255, 255, 255, 0.1);
             border: 3px solid rgba(255, 255, 255, 0.3);
             touch-action: none;
-            display: none; /* Se muestra solo en móvil */
+            display: none;
         }
         
         #joystickKnob {
@@ -91,7 +94,7 @@
             touch-action: none;
             box-shadow: 0 0 30px rgba(255, 0, 0, 0.4);
             cursor: pointer;
-            display: none; /* Se muestra solo en móvil */
+            display: none;
             font-weight: bold;
             text-shadow: 0 0 10px rgba(255,255,255,0.5);
         }
@@ -101,7 +104,7 @@
             box-shadow: 0 0 50px rgba(255, 0, 0, 0.8);
         }
         
-        /* INFORMACIÓN MÓVIL */
+        /* INFORMACIÓN */
         #mobileInfo {
             position: absolute;
             top: 10px;
@@ -116,6 +119,25 @@
             background: rgba(0,0,0,0.5);
             padding: 5px 15px;
             border-radius: 20px;
+            z-index: 10;
+        }
+        
+        #gamepadInfo {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(0,255,136,0.6);
+            font-size: 11px;
+            font-family: monospace;
+            pointer-events: none;
+            display: none;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(0,255,136,0.2);
+            z-index: 10;
         }
         
         /* RESPONSIVE */
@@ -179,11 +201,12 @@
         <div id="fireButton">🔥</div>
         
         <div id="mobileInfo">📱 MODO MÓVIL</div>
+        <div id="gamepadInfo">🎮 GAMEPAD CONECTADO</div>
     </div>
 
     <script>
         // ============================================
-        // SPACE SHOOTER - VERSIÓN MÓVIL
+        // SPACE SHOOTER - CON GAMEPAD
         // ============================================
         
         class SpaceShooter {
@@ -191,6 +214,9 @@
                 // Canvas
                 this.canvas = document.getElementById('game');
                 this.ctx = this.canvas.getContext('2d');
+                
+                // Prevenir scroll y zoom
+                this.preventScrollAndZoom();
                 
                 // Ajustar tamaño
                 this.resizeCanvas();
@@ -210,6 +236,7 @@
                 this.bullets = [];
                 this.enemies = [];
                 this.particles = [];
+                this.enemyBullets = [];
                 this.score = 0;
                 this.lives = 3;
                 this.gameRunning = true;
@@ -235,12 +262,50 @@
                 // Controles teclado (para PC)
                 this.keys = {};
                 
+                // Gamepad
+                this.gamepadIndex = null;
+                this.gamepadConnected = false;
+                this.gamepadDeadzone = 0.2;
+                this.gamepadShootPressed = false;
+                
                 // Joystick
                 this.joystick = document.getElementById('joystickArea');
                 this.joystickKnob = document.getElementById('joystickKnob');
                 this.fireButton = document.getElementById('fireButton');
+                this.gamepadInfo = document.getElementById('gamepadInfo');
                 
                 this.init();
+            }
+            
+            preventScrollAndZoom() {
+                // Prevenir scroll con teclas
+                window.addEventListener('keydown', (e) => {
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+                
+                // Prevenir zoom con Ctrl+Scroll o Cmd+Scroll
+                window.addEventListener('wheel', (e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+                
+                // Prevenir gestos de zoom en móvil (pinch)
+                document.addEventListener('gesturestart', (e) => e.preventDefault());
+                document.addEventListener('gesturechange', (e) => e.preventDefault());
+                document.addEventListener('gestureend', (e) => e.preventDefault());
+                
+                // Prevenir doble tap para zoom en móvil
+                let lastTouchEnd = 0;
+                document.addEventListener('touchend', (e) => {
+                    const now = Date.now();
+                    if (now - lastTouchEnd <= 300) {
+                        e.preventDefault();
+                    }
+                    lastTouchEnd = now;
+                }, { passive: false });
             }
             
             resizeCanvas() {
@@ -249,7 +314,6 @@
                 this.canvas.width = rect.width;
                 this.canvas.height = rect.height;
                 
-                // Actualizar posición del jugador si existe
                 if (this.player) {
                     this.player.x = Math.min(this.player.x, this.canvas.width - this.player.width);
                     this.player.y = Math.min(this.player.y, this.canvas.height - this.player.height);
@@ -272,6 +336,9 @@
                     this.keys[e.key] = false;
                 });
                 
+                // --- GAMEPAD ---
+                this.setupGamepad();
+                
                 // --- BOTÓN DE DISPARO (mouse/click) ---
                 this.fireButton.addEventListener('touchstart', (e) => {
                     e.preventDefault();
@@ -284,6 +351,50 @@
                 
                 // --- INICIAR JUEGO ---
                 this.gameLoop();
+            }
+            
+            setupGamepad() {
+                // Detectar conexión/desconexión de gamepad
+                window.addEventListener('gamepadconnected', (e) => {
+                    this.gamepadIndex = e.gamepad.index;
+                    this.gamepadConnected = true;
+                    this.gamepadInfo.style.display = 'block';
+                    this.gamepadInfo.textContent = '🎮 GAMEPAD CONECTADO';
+                    console.log('Gamepad conectado:', e.gamepad.id);
+                });
+                
+                window.addEventListener('gamepaddisconnected', (e) => {
+                    if (this.gamepadIndex === e.gamepad.index) {
+                        this.gamepadConnected = false;
+                        this.gamepadIndex = null;
+                        this.gamepadInfo.style.display = 'none';
+                        console.log('Gamepad desconectado');
+                    }
+                });
+                
+                // Intentar conectar gamepads ya conectados
+                const gamepads = navigator.getGamepads();
+                for (let i = 0; i < gamepads.length; i++) {
+                    if (gamepads[i]) {
+                        this.gamepadIndex = i;
+                        this.gamepadConnected = true;
+                        this.gamepadInfo.style.display = 'block';
+                        this.gamepadInfo.textContent = '🎮 GAMEPAD CONECTADO';
+                        break;
+                    }
+                }
+            }
+            
+            getGamepadState() {
+                if (!this.gamepadConnected || this.gamepadIndex === null) return null;
+                
+                const gamepad = navigator.getGamepads()[this.gamepadIndex];
+                if (!gamepad) {
+                    this.gamepadConnected = false;
+                    this.gamepadInfo.style.display = 'none';
+                    return null;
+                }
+                return gamepad;
             }
             
             setupTouchControls() {
@@ -304,7 +415,6 @@
                     this.touch.startY = touch.clientY - rect.top - rect.height/2;
                     this.touch.active = true;
                     
-                    // Mover el knob
                     this.updateJoystick(touch, rect);
                 };
                 
@@ -378,10 +488,8 @@
                     clampedY = (dy / dist) * maxDist;
                 }
                 
-                // Mover knob
                 this.joystickKnob.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
                 
-                // Calcular dirección (normalizada)
                 const normX = clampedX / maxDist;
                 const normY = clampedY / maxDist;
                 this.touch.dx = normX;
@@ -422,7 +530,6 @@
                     damage: 1
                 });
                 
-                // Efecto de disparo
                 this.addParticles(
                     this.player.x + this.player.width / 2,
                     this.player.y,
@@ -470,7 +577,6 @@
             }
             
             spawnEnemyBullet(enemy) {
-                this.enemyBullets = this.enemyBullets || [];
                 this.enemyBullets.push({
                     x: enemy.x + enemy.width / 2 - 3,
                     y: enemy.y + enemy.height,
@@ -486,7 +592,7 @@
                 // --- MOVIMIENTO JUGADOR ---
                 let dx = 0, dy = 0;
                 
-                // Joystick (móvil)
+                // Joystick (m贸vil)
                 if (this.touch.active) {
                     dx = this.touch.dx;
                     dy = this.touch.dy;
@@ -498,21 +604,50 @@
                 if (this.keys['ArrowUp'] || this.keys['w']) dy = -1;
                 if (this.keys['ArrowDown'] || this.keys['s']) dy = 1;
                 
+                // GAMEPAD
+                const gamepad = this.getGamepadState();
+                if (gamepad) {
+                    // Ejes izquierdos (movimiento)
+                    const gx = gamepad.axes[0];
+                    const gy = gamepad.axes[1];
+                    
+                    // Aplicar deadzone
+                    const gxAbs = Math.abs(gx);
+                    const gyAbs = Math.abs(gy);
+                    if (gxAbs > this.gamepadDeadzone) {
+                        dx = (gx / gxAbs) * ((gxAbs - this.gamepadDeadzone) / (1 - this.gamepadDeadzone));
+                    }
+                    if (gyAbs > this.gamepadDeadzone) {
+                        dy = (gy / gyAbs) * ((gyAbs - this.gamepadDeadzone) / (1 - this.gamepadDeadzone));
+                    }
+                    
+                    // Disparo con bot贸n A (0) o X (2) o bumper derecho (5)
+                    const shootPressed = gamepad.buttons[0].pressed || 
+                                        gamepad.buttons[2].pressed || 
+                                        gamepad.buttons[5].pressed;
+                    
+                    if (shootPressed && !this.gamepadShootPressed) {
+                        this.shoot();
+                    }
+                    this.gamepadShootPressed = shootPressed;
+                }
+                
                 // Normalizar movimiento diagonal
                 if (dx !== 0 && dy !== 0) {
-                    dx *= 0.707;
-                    dy *= 0.707;
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    dx /= len;
+                    dy /= len;
                 }
                 
                 this.player.x += dx * this.player.speed;
                 this.player.y += dy * this.player.speed;
                 
-                // Límites
+                // L铆mites
                 this.player.x = Math.max(0, Math.min(this.canvas.width - this.player.width, this.player.x));
                 this.player.y = Math.max(0, Math.min(this.canvas.height - this.player.height, this.player.y));
                 
-                // --- DISPARO AUTOMÁTICO (móvil) ---
-                if (this.touch.active || this.keys[' ']) {
+                // --- DISPARO AUTOM脕TICO (m贸vil) ---
+                if (this.touch.active || this.keys[' '] || this.keys['Space']) {
                     this.shoot();
                 }
                 
@@ -542,12 +677,10 @@
                     enemy.y += enemy.speed;
                     enemy.x += enemy.dx || 0;
                     
-                    // Rebote en paredes
                     if (enemy.x < 0 || enemy.x + enemy.width > this.canvas.width) {
                         enemy.dx *= -1;
                     }
                     
-                    // Disparo enemigo
                     enemy.shootTimer--;
                     if (enemy.shootTimer <= 0 && enemy.y > 50) {
                         this.spawnEnemyBullet(enemy);
@@ -561,7 +694,6 @@
                 }
                 
                 // --- ACTUALIZAR BALAS ENEMIGAS ---
-                this.enemyBullets = this.enemyBullets || [];
                 for (let i = 0; i < this.enemyBullets.length; i++) {
                     this.enemyBullets[i].y += this.enemyBullets[i].speed;
                     if (this.enemyBullets[i].y > this.canvas.height) {
@@ -570,7 +702,7 @@
                     }
                 }
                 
-                // --- ACTUALIZAR PARTÍCULAS ---
+                // --- ACTUALIZAR PART脥CULAS ---
                 for (let i = 0; i < this.particles.length; i++) {
                     const p = this.particles[i];
                     p.x += p.dx;
@@ -582,9 +714,7 @@
                         this.particles.splice(i, 1);
                         i--;
                     }
-                }
-                
-                // --- COLISIONES ---
+    }                  // --- COLISIONES ---
                 this.checkCollisions();
                 
                 // --- DIFICULTAD ---
@@ -597,11 +727,9 @@
                 for (let i = 0; i < this.bullets.length; i++) {
                     for (let j = 0; j < this.enemies.length; j++) {
                         if (this.colisionAABB(this.bullets[i], this.enemies[j])) {
-                            // Dañar enemigo
                             this.enemies[j].hp--;
                             this.bullets.splice(i, 1);
                             
-                            // Partículas de impacto
                             this.addParticles(
                                 this.enemies[j].x + this.enemies[j].width/2,
                                 this.enemies[j].y + this.enemies[j].height/2,
@@ -609,7 +737,6 @@
                             );
                             
                             if (this.enemies[j].hp <= 0) {
-                                // Destruir enemigo
                                 this.addParticles(
                                     this.enemies[j].x + this.enemies[j].width/2,
                                     this.enemies[j].y + this.enemies[j].height/2,
@@ -628,7 +755,6 @@
                 }
                 
                 // Balas enemigas vs Jugador
-                this.enemyBullets = this.enemyBullets || [];
                 for (let i = 0; i < this.enemyBullets.length; i++) {
                     if (this.colisionAABB(this.enemyBullets[i], this.player)) {
                         this.enemyBullets.splice(i, 1);
@@ -674,14 +800,13 @@
             }
             
             draw() {
-                // Limpiar
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
                 
-                // Fondo con estrellas
+                // Fondo
                 this.ctx.fillStyle = '#0a0a2e';
                 this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
                 
-                // Estrellas (efecto)
+                // Estrellas
                 if (!this.stars) {
                     this.stars = [];
                     for (let i = 0; i < 50; i++) {
@@ -703,7 +828,7 @@
                     this.ctx.fillRect(star.x, star.y, star.size, star.size);
                 });
                 
-                // --- DIBUJAR JUGADOR ---
+                // --- JUGADOR ---
                 const p = this.player;
                 this.ctx.fillStyle = '#00ff88';
                 this.ctx.shadowColor = '#00ff88';
@@ -716,12 +841,11 @@
                 this.ctx.fill();
                 this.ctx.shadowBlur = 0;
                 
-                // Contorno
                 this.ctx.strokeStyle = '#00cc66';
                 this.ctx.lineWidth = 2;
                 this.ctx.stroke();
                 
-                // --- DIBUJAR BALAS ---
+                // --- BALAS ---
                 this.ctx.fillStyle = '#ffff00';
                 this.ctx.shadowColor = '#ffff00';
                 this.ctx.shadowBlur = 10;
@@ -730,7 +854,7 @@
                 });
                 this.ctx.shadowBlur = 0;
                 
-                // --- DIBUJAR ENEMIGOS ---
+                // --- ENEMIGOS ---
                 this.enemies.forEach(enemy => {
                     if (enemy.type === 'tank') {
                         this.ctx.fillStyle = '#aa44ff';
@@ -744,7 +868,6 @@
                     this.ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
                     this.ctx.shadowBlur = 0;
                     
-                    // HP bar (tanks)
                     if (enemy.type === 'tank' && enemy.hp < enemy.maxHp) {
                         this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
                         this.ctx.fillRect(enemy.x, enemy.y - 8, enemy.width, 4);
@@ -753,8 +876,7 @@
                     }
                 });
                 
-                // --- DIBUJAR BALAS ENEMIGAS ---
-                this.enemyBullets = this.enemyBullets || [];
+                // --- BALAS ENEMIGAS ---
                 this.ctx.fillStyle = '#ff66aa';
                 this.ctx.shadowColor = '#ff66aa';
                 this.ctx.shadowBlur = 10;
@@ -763,7 +885,7 @@
                 });
                 this.ctx.shadowBlur = 0;
                 
-                // --- DIBUJAR PARTÍCULAS ---
+                // --- PART脥CULAS ---
                 this.particles.forEach(p => {
                     const alpha = p.life / p.maxLife;
                     this.ctx.globalAlpha = alpha;
@@ -776,17 +898,17 @@
                 this.ctx.fillStyle = '#ffffff';
                 this.ctx.font = 'bold 20px Arial';
                 this.ctx.textAlign = 'left';
-                this.ctx.fillText(`❤️ ${this.lives}`, 10, 30);
-                this.ctx.fillText(`⭐ ${this.score}`, 10, 60);
-                this.ctx.fillText(`🔥 ${this.combo}x`, 10, 90);
-                this.ctx.fillText(`📊 Lv.${this.level}`, 10, 120);
+                this.ctx.fillText(`鉂わ笍 ${this.lives}`, 10, 30);
+                this.ctx.fillText(`猸� ${this.score}`, 10, 60);
+                this.ctx.fillText(`馃敟 ${this.combo}x`, 10, 90);
+                this.ctx.fillText(`馃搳 Lv.${this.level}`, 10, 120);
                 
-                // Controles PC (indicador)
-                if (!('ontouchstart' in window)) {
+                // Indicador de controles
+                if (!('ontouchstart' in window) && !this.gamepadConnected) {
                     this.ctx.fillStyle = 'rgba(255,255,255,0.3)';
                     this.ctx.font = '14px Arial';
                     this.ctx.textAlign = 'center';
-                    this.ctx.fillText('⌨️ Flechas o WASD | Espacio para disparar', this.canvas.width/2, this.canvas.height - 20);
+                    this.ctx.fillText('鈱笍 Flechas o WASD | Espacio para disparar | 馃幃 Conecta un mando', this.canvas.width/2, this.canvas.height - 20);
                 }
             }
             
@@ -805,12 +927,11 @@
                 
                 this.ctx.fillStyle = '#ffffff';
                 this.ctx.font = '30px Arial';
-                this.ctx.fillText(`⭐ ${this.score}`, this.canvas.width/2, this.canvas.height/2 + 30);
-                this.ctx.fillText(`🔥 Mejor combo: ${this.maxCombo}x`, this.canvas.width/2, this.canvas.height/2 + 80);
+                this.ctx.fillText(`猸� ${this.score}`, this.canvas.width/2, this.canvas.height/2 + 30);
+                this.ctx.fillText(`馃敟 Mejor combo: ${this.maxCombo}x`, this.canvas.width/2, this.canvas.height/2 + 80);
                 this.ctx.font = '20px Arial';
-                this.ctx.fillText('🔄 Toca para reiniciar', this.canvas.width/2, this.canvas.height/2 + 140);
+                this.ctx.fillText('馃攧 Toca para reiniciar', this.canvas.width/2, this.canvas.height/2 + 140);
                 
-                // Reiniciar al tocar
                 const restart = () => {
                     this.score = 0;
                     this.lives = 3;
@@ -826,7 +947,6 @@
                     this.difficulty = 1;
                     this.level = 1;
                     
-                    // Remover eventos
                     this.canvas.removeEventListener('click', restart);
                     this.canvas.removeEventListener('touchstart', restart);
                 };
@@ -848,4 +968,4 @@
         const game = new SpaceShooter();
     </script>
 </body>
-</html>
+</html>              
