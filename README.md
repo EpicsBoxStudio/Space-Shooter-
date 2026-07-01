@@ -107,7 +107,7 @@ Este proyecto está bajo la licencia **MIT**. Si lo usas o modificas, menciona l
 
 ## 👤 Autor
 
-**Tu nombre o alias**  
+**Epics Box Studio**  
 - GitHub: [@tusuario](https://github.com/EpicsBoxStudio)  
 - Email: 10jpineda9@gmail.com  
 
